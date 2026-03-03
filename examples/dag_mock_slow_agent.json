@@ -1,0 +1,38 @@
+{
+  "agent": {
+    "command": "python3 scripts/mock_slow_agent.py",
+    "startup_wait_sec": 0.2
+  },
+  "runtime": {
+    "parallelism": 2,
+    "poll_interval_sec": 1.0,
+    "tmux_session": "agent-graph-slow",
+    "cleanup_session_on_success": false
+  },
+  "web": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8766
+  },
+  "tasks": [
+    {
+      "id": "prepare",
+      "prompt": "准备整体升级方案。"
+    },
+    {
+      "id": "upgrade-module-1",
+      "deps": ["prepare"],
+      "prompt": "升级模块 1 并给出影响分析。"
+    },
+    {
+      "id": "upgrade-module-2",
+      "deps": ["prepare"],
+      "prompt": "升级模块 2 并给出影响分析。"
+    },
+    {
+      "id": "finalize",
+      "deps": ["upgrade-module-1", "upgrade-module-2"],
+      "prompt": "汇总结果并确认全部任务完成。"
+    }
+  ]
+}

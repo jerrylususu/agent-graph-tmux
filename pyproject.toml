@@ -1,0 +1,14 @@
+[project]
+name = "260303-agent-graph-tmux"
+version = "0.1.0"
+description = "Static list/DAG tmux agent orchestrator with replaceable agent command"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+agent-graph = "agent_graph.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.24.2"]
+build-backend = "hatchling.build"
