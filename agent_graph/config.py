@@ -14,6 +14,7 @@ class ConfigError(ValueError):
 class AgentConfig:
     command: str = "codex --yolo"
     startup_wait_sec: float = 2.0
+    prompt_mode: str = "auto"
     default_workdir: str | None = None
     env: dict[str, str] = field(default_factory=dict)
 
@@ -26,7 +27,7 @@ class RuntimeConfig:
     tmux_mode: str = "multi_session"
     remain_on_exit: bool = True
     done_prefix: str = "AGENT_DONE:"
-    done_command_template: str = "python3 scripts/report_done.py --marker {marker_shell}"
+    done_command_template: str = "printf '%s\\n' {marker_shell}"
     cleanup_session_on_success: bool = True
     capture_lines: int = 3000
 
@@ -146,6 +147,16 @@ def _parse_agent(raw: dict[str, Any]) -> AgentConfig:
     if not isinstance(startup_wait_sec, (int, float)) or startup_wait_sec < 0:
         raise ConfigError("agent.startup_wait_sec must be >= 0")
 
+    prompt_mode = agent_raw.get("prompt_mode", DEFAULT_AGENT.prompt_mode)
+    if not isinstance(prompt_mode, str) or prompt_mode not in {
+        "auto",
+        "stdin_lines",
+        "command_arg",
+    }:
+        raise ConfigError(
+            "agent.prompt_mode must be one of: auto, stdin_lines, command_arg"
+        )
+
     default_workdir = agent_raw.get("default_workdir")
     if default_workdir is not None and not isinstance(default_workdir, str):
         raise ConfigError("agent.default_workdir must be a string")
@@ -155,6 +166,7 @@ def _parse_agent(raw: dict[str, Any]) -> AgentConfig:
     return AgentConfig(
         command=command.strip(),
         startup_wait_sec=float(startup_wait_sec),
+        prompt_mode=prompt_mode,
         default_workdir=default_workdir,
         env=env,
     )

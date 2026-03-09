@@ -73,3 +73,31 @@
 - 在 `remain_on_exit=false` 时增加短暂退出缓冲，降低 pane/session 快速回收导致的采集竞态。
 - README 补齐所有配置项说明（agent/runtime/web/tasks 全覆盖）。
 - 新增 `examples/workflow.full.json.example`（带 `//` 注释的完整模板）。
+
+
+## 2026-03-09
+
+15. 真实 Codex CLI 端到端修复与验证
+- 复现并确认：`codex` 在 tmux 中通过逐行 `send-keys + Enter` 注入多行 prompt 时，只会进入多行编辑态，不会自动提交任务。
+- 新增 `agent.prompt_mode` 配置项：`auto` / `stdin_lines` / `command_arg`。
+- 默认 `auto`：检测到 agent 可执行命令是 `codex` 时，改为把完整 prompt 作为启动参数传入；其他命令仍走 stdin 多行发送。
+- 修复默认完成命令模板：从依赖相对路径脚本改为 `printf '%s\n' {marker_shell}`，避免任务工作目录切到 `/tmp` 后 `scripts/report_done.py` 找不到。
+- 修复 done marker 检测：兼容 Codex TUI 对 shell 输出增加的前缀装饰（如 `└ `、`│ `），避免任务实际完成后仍无法命中 marker。
+- README 与 `examples/dag_codex_template.json` 更新为更适合无人值守的 Codex 示例：推荐 `-c check_for_update_on_startup=false --yolo --no-alt-screen`。
+
+16. 真实 Codex 最小用例验证
+- 在 `/tmp/ag-codex-before` 使用真实 `codex` 创建 `hello.txt`，实测 runner 正确识别 done marker。
+- 运行结果：`summary: total=1 succeeded=1 failed=0 blocked=0`。
+
+17. 真实 Codex 复杂 DAG 验证
+- 在 `/tmp/ag-complex-prime` 设计并执行 4 阶段 DAG：`create-project -> (review-project, extension-ideas) -> final-summary`。
+- `review-project` 与 `extension-ideas` 并行执行，并使用 `prompt_command` 注入动态文件清单。
+- 真实产物包括：`README.md`、`pyproject.toml`、`primekit/*`、`REVIEW.md`、`EXTENSIONS.md`、`FINAL_SUMMARY.md`。
+- 最终结果：`summary: total=4 succeeded=4 failed=0 blocked=0`，总耗时 `8:15.11`。
+
+18. 回归验证
+- 回跑 `examples/dag_mock_agent.json`，确认非 Codex agent 仍然走 `stdin_lines` 路径。
+- 运行结果：`summary: total=4 succeeded=4 failed=0 blocked=0`。
+
+19. 报告沉淀
+- 新增 `codex_e2e_report.md`，完整记录问题复现、修复方案、真实验证过程和测试结论（中文）。

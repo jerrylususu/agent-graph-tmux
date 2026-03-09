@@ -1,6 +1,7 @@
 {
   "agent": {
-    "command": "codex --yolo",
+    "command": "codex -c check_for_update_on_startup=false --yolo --no-alt-screen",
+    "prompt_mode": "auto",
     "startup_wait_sec": 2.0
   },
   "runtime": {

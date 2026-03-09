@@ -19,6 +19,10 @@
 1. `agent` 可替换，不写死
 - 默认命令是 `codex --yolo`，但可通过配置或 CLI 覆盖为任意命令。
 - 例如可改成 `claude ...`、`aider ...`、自定义脚本等。
+- 新增 `agent.prompt_mode`：
+  - `auto`：自动判断。检测到可执行命令是 `codex` 时，prompt 作为启动参数传入；其他命令默认按 stdin 多行发送。
+  - `command_arg`：强制把完整 prompt 作为命令行参数传入 agent。
+  - `stdin_lines`：强制按多行逐条发送到 agent stdin。
 
 2. prompt 输入支持两种来源
 - 静态文本：`prompt`
@@ -29,13 +33,17 @@
 - 每个任务启动时都会生成独立 marker：
   `AGENT_DONE:<task_id>:<hmac截断值>`
 - 编排器会在 prompt 末尾自动追加 `DONE_COMMAND`，要求 agent 在完成后执行该命令。
-- 默认命令模板：`python3 scripts/report_done.py --marker {marker_shell}`
+- 默认命令模板：`printf '%s\\n' {marker_shell}`
 - 模板变量：
   - `{marker}`：原始 marker
   - `{marker_shell}`：已做 shell 转义的 marker（推荐）
 - 编排器轮询 `tmux capture-pane`，命中 marker 视为任务完成。
 
-4. Web 进度页
+4. 完成命令默认不依赖仓库相对路径
+- 默认完成命令模板改为：`printf '%s\\n' {marker_shell}`。
+- 因此即使任务工作目录切到 `/tmp/...` 或其他项目目录，也能正确打印 done marker。
+
+5. Web 进度页
 - 默认地址：`http://127.0.0.1:8765`
 - 展示任务状态、依赖、tmux 窗口、错误信息。
 
@@ -84,8 +92,13 @@ python3 main.py run --config examples/dag_codex_template.json
 ```bash
 python3 main.py run \
   --config examples/dag_codex_template.json \
-  --agent-command "codex --yolo"
+  --agent-command "codex -c check_for_update_on_startup=false --yolo --no-alt-screen"
 ```
+
+说明：
+- 对 `codex`，默认 `agent.prompt_mode=auto` 会把完整 prompt 作为启动参数传入，避免在 tmux 中逐行回车时只进入多行编辑态、却没有真正提交的问题。
+- 建议给 `codex` 加上 `-c check_for_update_on_startup=false`，避免无人值守运行时被升级提示卡住。
+- 建议加 `--no-alt-screen`，这样 tmux `capture-pane` 更稳定，也更容易回看滚动历史。
 
 ### 4) 慢速 mock（每任务 30 秒）
 
@@ -114,6 +127,7 @@ http://127.0.0.1:8766
   "agent": {
     "command": "codex --yolo",
     "startup_wait_sec": 2.0,
+    "prompt_mode": "auto",
     "default_workdir": "/abs/path/to/repo",
     "env": {
       "GLOBAL_FLAG": "1"
@@ -126,7 +140,7 @@ http://127.0.0.1:8766
     "tmux_mode": "multi_session",
     "remain_on_exit": true,
     "done_prefix": "AGENT_DONE:",
-    "done_command_template": "python3 scripts/report_done.py --marker {marker_shell}",
+    "done_command_template": "printf '%s\\n' {marker_shell}",
     "cleanup_session_on_success": true,
     "capture_lines": 3000
   },
@@ -159,6 +173,7 @@ http://127.0.0.1:8766
 |---|---|---|---|
 | `command` | `string` | `codex --yolo` | 默认 agent 启动命令，可被任务级 `agent_command` 覆盖 |
 | `startup_wait_sec` | `number` | `2.0` | 启动后等待多久再发送 prompt |
+| `prompt_mode` | `string` | `auto` | `auto` / `stdin_lines` / `command_arg`；默认自动适配 `codex` |
 | `default_workdir` | `string \| null` | `null` | 默认工作目录，可被任务级 `workdir` 覆盖 |
 | `env` | `object<string,string>` | `{}` | 全局环境变量，可被任务级 `env` 追加/覆盖 |
 
@@ -172,7 +187,7 @@ http://127.0.0.1:8766
 | `tmux_mode` | `string` | `multi_session` | `multi_session`=每任务独立 session；`single_group`=单 session 多窗口 |
 | `remain_on_exit` | `bool` | `true` | 是否保留退出后的 pane（`true` 便于排障，`false` 可减少 dead pane；runner 会在进程退出前加短暂缓冲避免采集竞态） |
 | `done_prefix` | `string` | `AGENT_DONE:` | done marker 前缀 |
-| `done_command_template` | `string` | `python3 scripts/report_done.py --marker {marker_shell}` | 完成命令模板，支持 `{marker}` / `{marker_shell}` |
+| `done_command_template` | `string` | `printf '%s\n' {marker_shell}` | 完成命令模板，支持 `{marker}` / `{marker_shell}` |
 | `cleanup_session_on_success` | `bool` | `true` | 全部成功后是否清理 tmux session |
 | `capture_lines` | `int` | `3000` | `capture-pane` 回看行数（>=200） |
 

@@ -147,6 +147,18 @@ class Orchestrator:
         marker = self._gen_done_marker(task.id)
 
         command = task.agent_command or self.config.agent.command
+        prompt_text = self._build_prompt_text(task, marker)
+        prompt_mode = self._resolve_prompt_mode(command)
+        launch_command = command
+        prompt_lines: list[str] = []
+        prompt_sent = False
+
+        if prompt_mode == "command_arg":
+            launch_command = f"{command} {shlex.quote(prompt_text)}"
+            prompt_sent = True
+        else:
+            prompt_lines = self._prompt_text_to_lines(prompt_text)
+
         exit_grace_sec = self._resolve_exit_grace_sec()
         workdir = self._resolve_workdir(task)
         env = dict(self.config.agent.env)
@@ -163,7 +175,7 @@ class Orchestrator:
                 target = tmux.create_window(
                     session_name=session_name,
                     window_name=tmux.safe_window_name(task.id),
-                    command=command,
+                    command=launch_command,
                     workdir=workdir,
                     env=env,
                     exit_grace_sec=exit_grace_sec,
@@ -171,12 +183,11 @@ class Orchestrator:
             else:
                 target = tmux.run_command_in_window0(
                     session_name=session_name,
-                    command=command,
+                    command=launch_command,
                     workdir=workdir,
                     env=env,
                     exit_grace_sec=exit_grace_sec,
                 )
-            prompt_lines = self._build_prompt_lines(task, marker, workdir)
         except Exception as exc:
             self.status.update_task(
                 task.id,
@@ -187,7 +198,8 @@ class Orchestrator:
             self.log_fn(f"task failed to launch: {task.id} | {exc}")
             return
 
-        self._prompts[task.id] = prompt_lines
+        if prompt_lines:
+            self._prompts[task.id] = prompt_lines
         self._startup_time[task.id] = time.monotonic()
 
         self.status.update_task(
@@ -200,9 +212,11 @@ class Orchestrator:
             done_marker=marker,
             started_at=utc_now_iso(),
             error=None,
-            prompt_sent=False,
+            prompt_sent=prompt_sent,
         )
-        self.log_fn(f"task started: {task.id} | window={target}")
+        self.log_fn(
+            f"task started: {task.id} | window={target} | prompt_mode={prompt_mode}"
+        )
 
     def _poll_running_tasks(self) -> None:
         for task in self.config.tasks:
@@ -262,13 +276,9 @@ class Orchestrator:
             return None
         return str(Path(base).expanduser().resolve())
 
-    def _build_prompt_lines(
-        self,
-        task: TaskConfig,
-        marker: str,
-        workdir: str | None,
-    ) -> list[str]:
+    def _build_prompt_text(self, task: TaskConfig, marker: str) -> str:
         prompt_text = task.prompt or ""
+        workdir = self._resolve_workdir(task)
 
         if task.prompt_command:
             output = self._run_prompt_command(task.prompt_command, workdir)
@@ -293,8 +303,10 @@ class Orchestrator:
             "The command output is used by runner as completion signal."
         )
 
-        final_prompt = f"{prompt_text}{completion}".strip("\n")
-        return final_prompt.splitlines() or [final_prompt]
+        return f"{prompt_text}{completion}".strip("\n")
+
+    def _prompt_text_to_lines(self, prompt_text: str) -> list[str]:
+        return prompt_text.splitlines() or [prompt_text]
 
     def _run_prompt_command(self, command: str, workdir: str | None) -> str:
         proc = subprocess.run(
@@ -327,9 +339,46 @@ class Orchestrator:
             .strip()
         )
 
+    def _resolve_prompt_mode(self, command: str) -> str:
+        configured = self.config.agent.prompt_mode
+        if configured != "auto":
+            return configured
+
+        executable = self._extract_command_executable(command)
+        if executable == "codex":
+            return "command_arg"
+        return "stdin_lines"
+
+    def _extract_command_executable(self, command: str) -> str | None:
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            return None
+
+        if not parts:
+            return None
+
+        idx = 0
+        if parts[0] == "env":
+            idx = 1
+            while idx < len(parts) and "=" in parts[idx] and not parts[idx].startswith("-"):
+                idx += 1
+        else:
+            while idx < len(parts) and "=" in parts[idx] and not parts[idx].startswith("-"):
+                idx += 1
+
+        if idx >= len(parts):
+            return None
+        return Path(parts[idx]).name
+
     def _done_marker_seen(self, pane_output: str, marker: str) -> bool:
-        for line in pane_output.splitlines():
-            if line.strip() == marker:
+        for raw_line in pane_output.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("DONE_COMMAND:"):
+                continue
+
+            normalized = line.lstrip("│└├─• ").strip()
+            if normalized == marker:
                 return True
         return False
 
